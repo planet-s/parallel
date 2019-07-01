@@ -43,7 +43,7 @@ struct Opts {
     halt: bool,
 
     /// Ask the user before running each command
-    #[structopt(long)]
+    #[structopt(short, long)]
     interactive: bool,
 
     /// Start n jobs in parallel. Defaults to the number of cores available. 0 indicates to run one
@@ -75,9 +75,40 @@ fn add_jobs(
     command: Arc<String>,
     arguments: Vec<String>,
     argfile: Option<PathBuf>,
+    ask: bool,
     tx: Sender<String>,
 ) {
     let mut i = 0;
+    let mut always = false;
+    let mut start = |arg: String| {
+        let command = command.replace("{}", &arg);
+        if ask && !always {
+            loop {
+                eprint!("Do '{}'? [Y/n/a]: ", command);
+                let mut input = String::new();
+                if io::stdin()
+                    .read_line(&mut input)
+                    .expect("Failed to read line")
+                    == 0
+                {
+                    error!("Could not read from stdin in interactive mode");
+                    std::process::exit(1);
+                }
+                match input.trim() {
+                    "y" | "Y" | "yes" | "Yes" => break,
+                    "n" | "N" | "no" | "No" => return,
+                    "a" | "A" | "all" | "All" | "always" | "Always" => {
+                        always = true;
+                        break;
+                    }
+                    _ => eprintln!("Invalid choice"),
+                }
+            }
+        }
+        debug!("Starting {}: '{}'", i, command.replace("{}", &arg));
+        tx.send(arg.to_string()).unwrap();
+        i += 1;
+    };
     if arguments.is_empty() {
         if let Some(argfile) = argfile {
             let file = match File::open(&argfile) {
@@ -93,24 +124,16 @@ fn add_jobs(
             };
             for arg in BufReader::new(file).lines() {
                 let arg = arg.expect("Could not read the file");
-                debug!("Starting {}: '{}'", i, command.replace("{}", &arg));
-                tx.send(arg.to_string()).unwrap();
-                i += 1;
+                start(arg)
             }
         } else {
-            for arg in BufReader::new(io::stdin().lock()).lines() {
-                let arg = arg.expect("Could not read the file");
-                debug!("Starting {}: '{}'", i, command.replace("{}", &arg));
-                tx.send(arg.to_string()).unwrap();
-                i += 1;
+            for arg in BufReader::new(io::stdin()).lines() {
+                let arg = arg.expect("Could not stdin");
+                start(arg)
             }
         }
     } else {
-        for argument in arguments {
-            debug!("Starting {}: '{}'", i, command.replace("{}", &argument));
-            tx.send(argument).unwrap();
-            i += 1;
-        }
+        arguments.into_iter().for_each(start);
     }
 }
 
@@ -191,7 +214,7 @@ fn main() {
     let command = Arc::new(opts.command);
     start_workers(
         opts.jobs
-            .unwrap_or(num_cpus::get())
+            .unwrap_or_else(num_cpus::get)
             .min(opts.arguments.len()),
         opts.dry_run,
         &command,
@@ -199,7 +222,7 @@ fn main() {
         rtx,
     );
 
-    add_jobs(command, opts.arguments, opts.argfile, tx);
+    add_jobs(command, opts.arguments, opts.argfile, opts.interactive, tx);
 
     let mut exit = 0;
     while let Ok(result) = rrx.recv() {
