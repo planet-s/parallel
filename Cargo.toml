@@ -10,6 +10,7 @@ num_cpus = "0.2"
 structopt = "0.2"
 crossbeam-channel = "0.3"
 chrono = "0.4"
+indicatif = "0.11"
 
 # logging
 log = "0.4"

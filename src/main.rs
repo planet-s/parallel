@@ -1,5 +1,6 @@
 use chrono::{DateTime, Duration, Local};
 use crossbeam_channel::{Receiver, Sender};
+use indicatif::{ProgressBar, ProgressStyle};
 use ion_shell::Shell;
 use log::{debug, error, info, trace, warn};
 use simplelog::*;
@@ -95,7 +96,7 @@ fn add_jobs(
                     std::process::exit(1);
                 }
                 match input.trim() {
-                    "y" | "Y" | "yes" | "Yes" => break,
+                    "y" | "Y" | "yes" | "Yes" | "" => break,
                     "n" | "N" | "no" | "No" => return,
                     "a" | "A" | "all" | "All" | "always" | "Always" => {
                         always = true;
@@ -222,10 +223,22 @@ fn main() {
         rtx,
     );
 
+    let pb = if opts.arguments.is_empty() {
+        ProgressBar::new_spinner()
+    } else {
+        ProgressBar::new(opts.arguments.len() as u64)
+    };
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{prefix:.green}: [{elapsed_precise}] [{bar:40}] {pos:>7}/{len:7} ({eta})")
+            .progress_chars("█▇▆▅▄▃▂▁  "),
+    );
+    pb.set_prefix("Progress");
     add_jobs(command, opts.arguments, opts.argfile, opts.interactive, tx);
 
     let mut exit = 0;
     while let Ok(result) = rrx.recv() {
+        pb.inc(1);
         if !opts.dry_run {
             info!("'{}' took {}s", result.cmd, result.duration);
             if result.exit_code != 0 {
@@ -241,5 +254,6 @@ fn main() {
             }
         }
     }
+    pb.finish_with_message("done");
     std::process::exit(exit);
 }
