@@ -3,10 +3,13 @@ use crossbeam_channel::{Receiver, Sender};
 use ion_shell::Shell;
 use log::{debug, error, info, trace, warn};
 use simplelog::*;
-use std::fs::File;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::thread;
+use std::{
+    fs::File,
+    io::{self, BufRead, BufReader},
+    path::PathBuf,
+    sync::Arc,
+    thread,
+};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -54,7 +57,7 @@ struct Opts {
 
     /// Each line of the argfile will be treated as a replacement on the input
     #[structopt(short, long = "arg-file", parse(from_os_str))]
-    argfiles: Vec<PathBuf>,
+    argfile: Option<PathBuf>,
 
     // Positionals
     /// The command to run. '{}' tokens will be replaced with the list of arguments
@@ -158,9 +161,36 @@ fn main() {
         rtx,
     );
 
-    for (i, argument) in opts.arguments.into_iter().enumerate() {
+    let mut i = 0;
+    for argument in opts.arguments {
         debug!("Starting {}: '{}'", i, command.replace("{}", &argument));
         tx.send(argument).unwrap();
+        i += 1;
+    }
+    if let Some(argfile) = opts.argfile {
+        let file = match File::open(&argfile) {
+            Err(err) => {
+                error!(
+                    "Could not open arg file '{}' for reading: {}",
+                    argfile.to_string_lossy(),
+                    err
+                );
+                std::process::exit(1);
+            }
+            Ok(file) => file,
+        };
+        for arg in BufReader::new(file).lines() {
+            let arg = arg.expect("Could not read the file");
+            debug!("Starting {}: '{}'", i, command.replace("{}", &arg));
+            tx.send(arg.to_string()).unwrap();
+            i += 1;
+        }
+    }
+    for arg in BufReader::new(io::stdin().lock()).lines() {
+        let arg = arg.expect("Could not read the file");
+        debug!("Starting {}: '{}'", i, command.replace("{}", &arg));
+        tx.send(arg.to_string()).unwrap();
+        i += 1;
     }
     std::mem::drop(tx);
 
