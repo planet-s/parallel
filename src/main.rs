@@ -3,7 +3,6 @@ use crossbeam_channel::{Receiver, Sender};
 use ion_shell::Shell;
 use log::{debug, error, info, trace, warn};
 use simplelog::*;
-use std::fmt;
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -71,16 +70,6 @@ struct JobResult {
     start: DateTime<Local>,
     duration: Duration,
     cmd: String,
-}
-
-impl fmt::Display for JobResult {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "'{}', took {}s and exited with code {}",
-            self.cmd, self.duration, self.exit_code
-        )
-    }
 }
 
 fn create_logger(opts: &Opts) {
