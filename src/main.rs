@@ -78,35 +78,39 @@ fn add_jobs(
     tx: Sender<String>,
 ) {
     let mut i = 0;
-    for argument in arguments {
-        debug!("Starting {}: '{}'", i, command.replace("{}", &argument));
-        tx.send(argument).unwrap();
-        i += 1;
-    }
-    if let Some(argfile) = argfile {
-        let file = match File::open(&argfile) {
-            Err(err) => {
-                error!(
-                    "Could not open arg file '{}' for reading: {}",
-                    argfile.to_string_lossy(),
-                    err
-                );
-                std::process::exit(1);
+    if arguments.is_empty() {
+        if let Some(argfile) = argfile {
+            let file = match File::open(&argfile) {
+                Err(err) => {
+                    error!(
+                        "Could not open arg file '{}' for reading: {}",
+                        argfile.to_string_lossy(),
+                        err
+                    );
+                    std::process::exit(1);
+                }
+                Ok(file) => file,
+            };
+            for arg in BufReader::new(file).lines() {
+                let arg = arg.expect("Could not read the file");
+                debug!("Starting {}: '{}'", i, command.replace("{}", &arg));
+                tx.send(arg.to_string()).unwrap();
+                i += 1;
             }
-            Ok(file) => file,
-        };
-        for arg in BufReader::new(file).lines() {
-            let arg = arg.expect("Could not read the file");
-            debug!("Starting {}: '{}'", i, command.replace("{}", &arg));
-            tx.send(arg.to_string()).unwrap();
+        } else {
+            for arg in BufReader::new(io::stdin().lock()).lines() {
+                let arg = arg.expect("Could not read the file");
+                debug!("Starting {}: '{}'", i, command.replace("{}", &arg));
+                tx.send(arg.to_string()).unwrap();
+                i += 1;
+            }
+        }
+    } else {
+        for argument in arguments {
+            debug!("Starting {}: '{}'", i, command.replace("{}", &argument));
+            tx.send(argument).unwrap();
             i += 1;
         }
-    }
-    for arg in BufReader::new(io::stdin().lock()).lines() {
-        let arg = arg.expect("Could not read the file");
-        debug!("Starting {}: '{}'", i, command.replace("{}", &arg));
-        tx.send(arg.to_string()).unwrap();
-        i += 1;
     }
 }
 
