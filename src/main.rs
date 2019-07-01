@@ -33,11 +33,7 @@ struct Opts {
     /// (start), duration in floating-point seconds (duration), command run (cmd), exit status (exit_code)
     #[structopt(short, long, parse(from_os_str))]
     log: Option<PathBuf>,
-    // /// Timestamp (sec, ms, ns, none)
-    // #[structopt(long)]
-    // timestamp: Option<String>,
 
-    // dry run
     /// Print the jobs to stdout, but don't execute them
     #[structopt(long = "dry-run")]
     dry_run: bool,
@@ -123,7 +119,6 @@ fn create_logger(opts: &Opts) {
         _ => LevelFilter::Trace,
     };
     let config = Config::default();
-    // config.time_format = opt.timestamp;
     let mut loggers: Vec<Box<dyn SharedLogger>> =
         vec![TermLogger::new(level, config, TerminalMode::Stderr).unwrap()];
     if let Some(file) = &opts.log {
@@ -207,11 +202,15 @@ fn main() {
         if !opts.dry_run {
             info!("'{}' took {}s", result.cmd, result.duration);
             if result.exit_code != 0 {
-                exit = 1;
                 warn!(
                     "'{}' exited with status code {}",
                     result.cmd, result.exit_code
                 );
+                if opts.halt {
+                    std::process::exit(1);
+                } else {
+                    exit = 1;
+                }
             }
         }
     }
