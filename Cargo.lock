@@ -571,6 +571,7 @@ dependencies = [
 name = "parallelion"
 version = "0.1.0"
 dependencies = [
+ "chrono 0.4.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "crossbeam-channel 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "ion-shell 1.0.0-alpha (git+https://gitlab.redox-os.org/redox-os/ion)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",

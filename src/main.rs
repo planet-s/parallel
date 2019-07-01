@@ -1,4 +1,6 @@
+use chrono::{DateTime, Duration, Local};
 use crossbeam_channel::{Receiver, Sender};
+use ion_shell::Shell;
 use log::{debug, error, info, trace, warn};
 use simplelog::*;
 use std::fmt;
@@ -65,9 +67,9 @@ struct Opts {
 #[derive(Debug, Clone, PartialEq)]
 struct JobResult {
     seq: usize,
-    exit_code: usize,
-    start: u8,
-    duration: f64,
+    exit_code: i32,
+    start: DateTime<Local>,
+    duration: Duration,
     cmd: String,
 }
 
@@ -75,8 +77,8 @@ impl fmt::Display for JobResult {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "[{}] '{}', started at {}, took {}s and exited with code {}",
-            self.seq, self.cmd, self.start, self.duration, self.exit_code
+            "'{}', took {}s and exited with code {}",
+            self.cmd, self.duration, self.exit_code
         )
     }
 }
@@ -87,7 +89,7 @@ fn create_logger(opts: &Opts) {
         (_, 0) => LevelFilter::Warn,
         (_, 1) => LevelFilter::Info,
         (_, 2) => LevelFilter::Debug,
-        (..) => LevelFilter::Trace,
+        _ => LevelFilter::Trace,
     };
     let config = Config::default();
     // config.time_format = opt.timestamp;
@@ -103,7 +105,26 @@ fn create_logger(opts: &Opts) {
     CombinedLogger::init(loggers).unwrap();
 }
 
-fn start_workers(n: usize, task: &Arc<String>, jobs: Receiver<String>, results: Sender<JobResult>) {
+// TODO: Add a feature to use Ion as an external command
+fn run(check_only: bool, cmd: &str) -> i32 {
+    let mut shell = Shell::default();
+    shell.opts_mut().no_exec = check_only;
+    match shell.execute_command(cmd.as_bytes()) {
+        Err(err) => {
+            error!("could not execute command '{}': {}", cmd, err);
+            1
+        }
+        Ok(_) => shell.previous_status().as_os_code(),
+    }
+}
+
+fn start_workers(
+    n: usize,
+    check_only: bool,
+    task: &Arc<String>,
+    jobs: Receiver<String>,
+    results: Sender<JobResult>,
+) {
     debug!("Starting {} worker threads", n);
     for seq in 0..n {
         let jobs = jobs.clone();
@@ -111,14 +132,17 @@ fn start_workers(n: usize, task: &Arc<String>, jobs: Receiver<String>, results: 
         let task = task.clone();
         thread::spawn(move || {
             while let Ok(job) = jobs.recv() {
+                let start = Local::now();
                 let cmd = task.replace("{}", &job);
+                let exit_code = run(check_only, &cmd);
+                let duration = start.signed_duration_since(Local::now());
                 results
                     .send(JobResult {
                         seq,
-                        start: 0,
-                        duration: 0.,
+                        start,
+                        duration,
                         cmd,
-                        exit_code: 0,
+                        exit_code,
                     })
                     .unwrap();
             }
@@ -139,6 +163,7 @@ fn main() {
         opts.jobs
             .unwrap_or(num_cpus::get())
             .min(opts.arguments.len()),
+        opts.dry_run,
         &command,
         rx,
         rtx,
@@ -150,11 +175,18 @@ fn main() {
     }
     std::mem::drop(tx);
 
+    let mut exit = 0;
     while let Ok(result) = rrx.recv() {
-        if result.exit_code == 0 {
-            info!("{}", result);
-        } else {
-            warn!("{}", result);
+        if !opts.dry_run {
+            info!("'{}' took {}s", result.cmd, result.duration);
+            if result.exit_code != 0 {
+                exit = 1;
+                warn!(
+                    "'{}' exited with status code {}",
+                    result.cmd, result.exit_code
+                );
+            }
         }
     }
+    std::process::exit(exit);
 }
