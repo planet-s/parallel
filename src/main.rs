@@ -1,6 +1,7 @@
 use crossbeam_channel::{Receiver, Sender};
 use log::{debug, error, info, trace, warn};
 use simplelog::*;
+use std::fmt;
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -25,7 +26,7 @@ struct Opts {
     /// Log the executed jobs to the following file
     ///
     /// The format used is a json with the following fields: sequence number (seq), start time
-    /// (start), duration in floating-point seconds (duration), command run (cmd), exit status (status)
+    /// (start), duration in floating-point seconds (duration), command run (cmd), exit status (exit_code)
     #[structopt(short, long, parse(from_os_str))]
     log: Option<PathBuf>,
     // /// Timestamp (sec, ms, ns, none)
@@ -61,6 +62,25 @@ struct Opts {
     arguments: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct JobResult {
+    seq: usize,
+    exit_code: usize,
+    start: u8,
+    duration: f64,
+    cmd: String,
+}
+
+impl fmt::Display for JobResult {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "[{}] '{}', started at {}, took {}s and exited with code {}",
+            self.seq, self.cmd, self.start, self.duration, self.exit_code
+        )
+    }
+}
+
 fn create_logger(opts: &Opts) {
     let level = match (opts.quiet, opts.verbose) {
         (true, _) => LevelFilter::Error,
@@ -83,17 +103,24 @@ fn create_logger(opts: &Opts) {
     CombinedLogger::init(loggers).unwrap();
 }
 
-fn start_workers(n: usize, task: Arc<String>, jobs: Receiver<String>, results: Sender<usize>) {
-    info!("Starting {} worker threads", n);
-    for _ in 0..n {
+fn start_workers(n: usize, task: &Arc<String>, jobs: Receiver<String>, results: Sender<JobResult>) {
+    debug!("Starting {} worker threads", n);
+    for seq in 0..n {
         let jobs = jobs.clone();
         let results = results.clone();
         let task = task.clone();
         thread::spawn(move || {
             while let Ok(job) = jobs.recv() {
-                let job = task.replace("{}", &job);
-                info!("Command: {}", job);
-                results.send(1).unwrap();
+                let cmd = task.replace("{}", &job);
+                results
+                    .send(JobResult {
+                        seq,
+                        start: 0,
+                        duration: 0.,
+                        cmd,
+                        exit_code: 0,
+                    })
+                    .unwrap();
             }
         });
     }
@@ -112,17 +139,22 @@ fn main() {
         opts.jobs
             .unwrap_or(num_cpus::get())
             .min(opts.arguments.len()),
-        command,
+        &command,
         rx,
         rtx,
     );
 
-    for argument in opts.arguments {
+    for (i, argument) in opts.arguments.into_iter().enumerate() {
+        debug!("Starting {}: '{}'", i, command.replace("{}", &argument));
         tx.send(argument).unwrap();
     }
     std::mem::drop(tx);
 
     while let Ok(result) = rrx.recv() {
-        eprintln!("result: {}", result);
+        if result.exit_code == 0 {
+            info!("{}", result);
+        } else {
+            warn!("{}", result);
+        }
     }
 }
